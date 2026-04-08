@@ -817,12 +817,17 @@ class LightboxPro {
     }
   }
 
+  isMobile() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+  }
+
   async downloadConverted(src, fileName, mimeType, extension) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     
     return new Promise((resolve, reject) => {
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
@@ -836,8 +841,23 @@ class LightboxPro {
         
         ctx.drawImage(img, 0, 0);
         
-        canvas.toBlob((blob) => {
+        canvas.toBlob(async (blob) => {
           if (blob) {
+            if (this.isMobile() && navigator.canShare) {
+              const file = new File([blob], `${fileName}.${extension}`, { type: mimeType });
+              if (navigator.canShare({ files: [file] })) {
+                try {
+                  await navigator.share({ files: [file] });
+                  resolve();
+                  return;
+                } catch (err) {
+                  if (err.name !== 'AbortError') {
+                    console.warn(`[${LightboxPro.pluginName}] Share failed, falling back to download:`, err);
+                  }
+                }
+              }
+            }
+            
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
