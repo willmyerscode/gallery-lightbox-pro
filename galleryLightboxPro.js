@@ -70,6 +70,7 @@ class LightboxPro {
     this.boundHandlers = {};
     this.headerControls = null;
     this.footer = null;
+    this.countEl = null;
     this.innerContainer = null;
     this.toast = null;
 
@@ -288,6 +289,8 @@ class LightboxPro {
     this.removeToast();
     this.resetZoom();
     this.currentIndex = 0;
+    this.useManualNavigation = false;
+    clearTimeout(this.manualNavTimeout);
     
     LightboxPro.emitEvent(':lightboxClose', { el: this.section }, this.section);
   }
@@ -474,6 +477,14 @@ class LightboxPro {
         wrapper.removeEventListener('touchend', this.boundHandlers.preventSwipe, { capture: true });
         this.boundHandlers.preventSwipe = null;
       }
+      if (this.boundHandlers.swipeTouchStart) {
+        wrapper.removeEventListener('touchstart', this.boundHandlers.swipeTouchStart, { passive: true });
+        this.boundHandlers.swipeTouchStart = null;
+      }
+      if (this.boundHandlers.swipeTouchEnd) {
+        wrapper.removeEventListener('touchend', this.boundHandlers.swipeTouchEnd, { passive: true });
+        this.boundHandlers.swipeTouchEnd = null;
+      }
     }
     
     this.isNavigating = false;
@@ -500,14 +511,16 @@ class LightboxPro {
       navContainer.appendChild(prevBtn);
     }
 
-    const countEl = document.createElement('span');
-    countEl.className = 'lbp-image-count';
-    countEl.textContent = `${this.currentIndex}/${this.totalImages}`;
-    countEl.style.opacity = '0';
-    navContainer.appendChild(countEl);
+    this.countEl = document.createElement('span');
+    this.countEl.className = 'lbp-image-count';
+    this.countEl.textContent = `${this.currentIndex}/${this.totalImages}`;
+    this.countEl.style.opacity = '0';
+    navContainer.appendChild(this.countEl);
     
     setTimeout(() => {
-      countEl.style.opacity = '';
+      if (this.countEl) {
+        this.countEl.style.opacity = '';
+      }
     }, 1000);
 
     if (this.settings.arrowPosition === 'bottom' && this.totalImages > 1) {
@@ -542,6 +555,7 @@ class LightboxPro {
       this.footer.remove();
       this.footer = null;
     }
+    this.countEl = null;
     const existingFooter = this.lightbox?.querySelector('.lbp-footer');
     if (existingFooter) {
       existingFooter.remove();
@@ -611,19 +625,17 @@ class LightboxPro {
     this.isNavigating = false;
     this.lastActiveIndex = this.currentIndex;
 
-    const handleSlideChange = () => {
-      this.resetZoom();
-      if (this.settings.mobileNavigationType === 'swipe') {
-        this.updateCurrentIndex();
-        if (this.currentIndex !== this.lastActiveIndex) {
-          this.lastActiveIndex = this.currentIndex;
-          this.updateFooter();
-        }
-      }
-    };
+    this.useManualNavigation = false;
 
     const observer = new MutationObserver(() => {
-      handleSlideChange();
+      this.resetZoom();
+      
+      if (this.useManualNavigation) {
+        return;
+      }
+      
+      this.updateCurrentIndex();
+      this.updateFooter();
     });
 
     observer.observe(list, {
@@ -642,8 +654,13 @@ class LightboxPro {
         this.currentIndex = this.currentIndex < this.totalImages ? this.currentIndex + 1 : 1;
       }
       
-      this.lastActiveIndex = this.currentIndex;
-      this.updateFooter();
+      this.updateCountDisplay();
+      
+      this.useManualNavigation = true;
+      clearTimeout(this.manualNavTimeout);
+      this.manualNavTimeout = setTimeout(() => {
+        this.useManualNavigation = false;
+      }, 500);
     };
 
     const prevControl = this.lightboxWrapper.querySelector('.gallery-lightbox-control[data-previous] button');
@@ -673,7 +690,43 @@ class LightboxPro {
 
     if (this.settings.mobileNavigationType === 'arrows') {
       this.disableNativeSwipe();
+    } else {
+      this.setupSwipeDetection();
     }
+  }
+
+  setupSwipeDetection() {
+    const wrapper = this.lightbox.querySelector('.gallery-lightbox-wrapper');
+    if (!wrapper) return;
+
+    let startX = 0;
+    let startY = 0;
+
+    this.boundHandlers.swipeTouchStart = (e) => {
+      if (e.touches && e.touches.length === 1) {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }
+    };
+
+    this.boundHandlers.swipeTouchEnd = (e) => {
+      if (e.changedTouches && e.changedTouches.length === 1) {
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
+        const diffX = Math.abs(endX - startX);
+        const diffY = Math.abs(endY - startY);
+        
+        if (diffX > 30 && diffX > diffY) {
+          setTimeout(() => {
+            this.updateCurrentIndex();
+            this.updateFooter();
+          }, 350);
+        }
+      }
+    };
+
+    wrapper.addEventListener('touchstart', this.boundHandlers.swipeTouchStart, { passive: true });
+    wrapper.addEventListener('touchend', this.boundHandlers.swipeTouchEnd, { passive: true });
   }
 
   disableNativeSwipe() {
@@ -691,13 +744,16 @@ class LightboxPro {
     wrapper.addEventListener('touchend', this.boundHandlers.preventSwipe, { capture: true });
   }
 
+  updateCountDisplay() {
+    if (this.countEl) {
+      this.countEl.textContent = `${this.currentIndex}/${this.totalImages}`;
+    }
+  }
+
   updateFooter() {
     if (!this.footer) return;
 
-    const countEl = this.footer.querySelector('.lbp-image-count');
-    if (countEl) {
-      countEl.textContent = `${this.currentIndex}/${this.totalImages}`;
-    }
+    this.updateCountDisplay();
 
     if (this.settings.description) {
       const descEl = this.footer.querySelector('.lbp-description');
