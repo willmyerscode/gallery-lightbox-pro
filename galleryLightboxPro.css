@@ -288,19 +288,6 @@ body.lbp-lightbox-open > *:not(.gallery-lightbox-outer-wrapper) {
   margin: 0 auto;
 }
 
-/* Description overlay mode */
-.gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-description="overlay"] .lbp-description {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-  padding: 40px 20px 20px;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
 /* Zoom transform on images */
 .gallery-lightbox-outer-wrapper[data-lbp-active="true"] .gallery-lightbox-item-img img {
   transition: transform 0.3s ease;
@@ -330,27 +317,24 @@ body.lbp-lightbox-open > *:not(.gallery-lightbox-outer-wrapper) {
   display: none;
 }
 
-/* Ensure touch events work for Squarespace's native swipe navigation */
-.gallery-lightbox-outer-wrapper[data-lbp-active="true"] .gallery-lightbox-wrapper {
-  touch-action: pan-x pan-y;
-}
-
-.gallery-lightbox-outer-wrapper[data-lbp-active="true"] .gallery-lightbox-list {
-  touch-action: pan-x;
-}
-
-.gallery-lightbox-outer-wrapper[data-lbp-active="true"] .gallery-lightbox-item {
-  touch-action: pan-x;
-}
-
-.gallery-lightbox-outer-wrapper[data-lbp-active="true"] .gallery-lightbox-item-img {
-  touch-action: pan-x;
-  pointer-events: auto;
+/* Disable swipe when using arrows navigation */
+.gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-mobile-nav="arrows"] .gallery-lightbox-wrapper,
+.gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-mobile-nav="arrows"] .gallery-lightbox-list,
+.gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-mobile-nav="arrows"] .gallery-lightbox-item,
+.gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-mobile-nav="arrows"] .gallery-lightbox-item-img {
+  touch-action: none;
 }
 
 /* Mobile navigation arrows - hidden on desktop */
 .gallery-lightbox-outer-wrapper[data-lbp-active="true"] .lbp-mobile-nav {
   display: none;
+}
+
+/* Hide bottom arrows on mobile when using swipe navigation */
+@media (max-width: 767px) {
+  .gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-arrows="bottom"][data-lbp-mobile-nav="swipe"] .lbp-footer-nav {
+    display: none;
+  }
 }
 
 /* Mobile responsive */
@@ -384,6 +368,11 @@ body.lbp-lightbox-open > *:not(.gallery-lightbox-outer-wrapper) {
   .gallery-lightbox-outer-wrapper[data-lbp-active="true"] .lbp-description {
     font-size: 12px;
     max-width: 100%;
+  }
+
+  /* Hide mobile side arrows when using bottom arrows */
+  .gallery-lightbox-outer-wrapper[data-lbp-active="true"][data-lbp-arrows="bottom"][data-lbp-mobile-nav="arrows"] .lbp-mobile-nav {
+    display: none;
   }
 
   /* Mobile navigation arrows */
@@ -427,3 +416,4 @@ body.lbp-lightbox-open > *:not(.gallery-lightbox-outer-wrapper) {
     stroke-width: 2;
   }
 }
+
