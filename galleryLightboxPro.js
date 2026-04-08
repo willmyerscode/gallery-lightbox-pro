@@ -11,7 +11,8 @@ class LightboxPro {
     downloadEnabled: true,
     shareEnabled: true,
     arrowPosition: 'default',
-    description: false
+    description: false,
+    mobileNavigationType: 'swipe'
   };
 
   static icons = {
@@ -197,6 +198,8 @@ class LightboxPro {
     if (this.settings.description) {
       this.lightboxWrapper.setAttribute('data-lbp-description', this.settings.description);
     }
+    
+    this.lightboxWrapper.setAttribute('data-lbp-mobile-nav', this.settings.mobileNavigationType);
 
     this.removeFooter();
     this.currentIndex = 0;
@@ -465,13 +468,11 @@ class LightboxPro {
     
     const wrapper = this.lightbox?.querySelector('.gallery-lightbox-wrapper');
     if (wrapper) {
-      if (this.boundHandlers.touchStart) {
-        wrapper.removeEventListener('touchstart', this.boundHandlers.touchStart);
-        this.boundHandlers.touchStart = null;
-      }
-      if (this.boundHandlers.touchEnd) {
-        wrapper.removeEventListener('touchend', this.boundHandlers.touchEnd);
-        this.boundHandlers.touchEnd = null;
+      if (this.boundHandlers.preventSwipe) {
+        wrapper.removeEventListener('touchstart', this.boundHandlers.preventSwipe, { capture: true });
+        wrapper.removeEventListener('touchmove', this.boundHandlers.preventSwipe, { capture: true });
+        wrapper.removeEventListener('touchend', this.boundHandlers.preventSwipe, { capture: true });
+        this.boundHandlers.preventSwipe = null;
       }
     }
     
@@ -526,7 +527,7 @@ class LightboxPro {
 
     footer.appendChild(navContainer);
 
-    if (this.totalImages > 1) {
+    if (this.totalImages > 1 && this.settings.mobileNavigationType === 'arrows') {
       this.buildMobileArrows(wrapper);
     }
 
@@ -590,6 +591,11 @@ class LightboxPro {
       const slideUrl = activeSlide.dataset.slideUrl;
       if (slideUrl && this.slideUrlToIndex[slideUrl]) {
         this.currentIndex = this.slideUrlToIndex[slideUrl];
+      } else {
+        const lbpIndex = activeSlide.getAttribute('data-lbp-index');
+        if (lbpIndex) {
+          this.currentIndex = parseInt(lbpIndex, 10);
+        }
       }
     }
     
@@ -603,12 +609,21 @@ class LightboxPro {
     if (!list) return;
 
     this.isNavigating = false;
+    this.lastActiveIndex = this.currentIndex;
+
+    const handleSlideChange = () => {
+      this.resetZoom();
+      if (this.settings.mobileNavigationType === 'swipe') {
+        this.updateCurrentIndex();
+        if (this.currentIndex !== this.lastActiveIndex) {
+          this.lastActiveIndex = this.currentIndex;
+          this.updateFooter();
+        }
+      }
+    };
 
     const observer = new MutationObserver(() => {
-      this.resetZoom();
-      if (this.isNavigating) return;
-      this.updateCurrentIndex();
-      this.updateFooter();
+      handleSlideChange();
     });
 
     observer.observe(list, {
@@ -619,15 +634,15 @@ class LightboxPro {
 
     this.observers.push(observer);
 
+
     const navigate = (direction) => {
-      this.isNavigating = true;
-      
       if (direction === 'prev') {
         this.currentIndex = this.currentIndex > 1 ? this.currentIndex - 1 : this.totalImages;
       } else {
         this.currentIndex = this.currentIndex < this.totalImages ? this.currentIndex + 1 : 1;
       }
       
+      this.lastActiveIndex = this.currentIndex;
       this.updateFooter();
     };
 
@@ -656,44 +671,24 @@ class LightboxPro {
     };
     document.addEventListener('keydown', this.boundHandlers.keydown);
 
-    this.setupTouchSwipe(navigate);
+    if (this.settings.mobileNavigationType === 'arrows') {
+      this.disableNativeSwipe();
+    }
   }
 
-  setupTouchSwipe(navigate) {
+  disableNativeSwipe() {
     const wrapper = this.lightbox.querySelector('.gallery-lightbox-wrapper');
     if (!wrapper) return;
 
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let touchEndX = 0;
-    let touchEndY = 0;
-    const minSwipeDistance = 50;
-
-    this.boundHandlers.touchStart = (e) => {
-      touchStartX = e.changedTouches[0].screenX;
-      touchStartY = e.changedTouches[0].screenY;
-    };
-
-    this.boundHandlers.touchEnd = (e) => {
-      touchEndX = e.changedTouches[0].screenX;
-      touchEndY = e.changedTouches[0].screenY;
-      
-      const deltaX = touchEndX - touchStartX;
-      const deltaY = touchEndY - touchStartY;
-      
-      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
-        if (deltaX > 0) {
-          navigate('prev');
-          this.navigatePrev();
-        } else {
-          navigate('next');
-          this.navigateNext();
-        }
+    this.boundHandlers.preventSwipe = (e) => {
+      if (e.touches && e.touches.length === 1) {
+        e.stopPropagation();
       }
     };
 
-    wrapper.addEventListener('touchstart', this.boundHandlers.touchStart, { passive: true });
-    wrapper.addEventListener('touchend', this.boundHandlers.touchEnd, { passive: true });
+    wrapper.addEventListener('touchstart', this.boundHandlers.preventSwipe, { capture: true });
+    wrapper.addEventListener('touchmove', this.boundHandlers.preventSwipe, { capture: true });
+    wrapper.addEventListener('touchend', this.boundHandlers.preventSwipe, { capture: true });
   }
 
   updateFooter() {
@@ -936,6 +931,7 @@ class LightboxPro {
       this.lightboxWrapper.removeAttribute('data-lbp-arrows');
       this.lightboxWrapper.removeAttribute('data-lbp-custom-arrows');
       this.lightboxWrapper.removeAttribute('data-lbp-description');
+      this.lightboxWrapper.removeAttribute('data-lbp-mobile-nav');
     }
 
     this.section.removeAttribute('data-wm-plugin');
