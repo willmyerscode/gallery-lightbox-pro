@@ -343,7 +343,13 @@ class LightboxPro {
       downloadBtn.className = 'lbp-header-btn lbp-download-btn';
       downloadBtn.setAttribute('aria-label', 'Download');
       downloadBtn.innerHTML = LightboxPro.icons.download;
-      downloadBtn.addEventListener('click', () => {
+      downloadBtn.addEventListener('click', (e) => {
+        if (this.isMobile()) {
+          e.preventDefault();
+          e.stopPropagation();
+          void this.handleMobileDownloadOriginal();
+          return;
+        }
         this.toggleDownloadDropdown();
       });
       
@@ -794,6 +800,97 @@ class LightboxPro {
     }
   }
 
+  extensionFromMime(mime) {
+    if (!mime) return '';
+    const m = mime.split(';')[0].trim().toLowerCase();
+    const map = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/svg+xml': 'svg',
+      'image/avif': 'avif'
+    };
+    return map[m] || '';
+  }
+
+  extensionFromUrl(url) {
+    try {
+      const pathname = new URL(url, window.location.href).pathname;
+      const match = pathname.match(/\.([a-z0-9]+)$/i);
+      return match ? match[1].toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  async handleMobileDownloadOriginal() {
+    const imageInfo = this.imageData.find(img => img.index === this.currentIndex);
+    if (!imageInfo) return;
+
+    const url = imageInfo.originalSrc;
+    const fallbackBase = `image-${this.currentIndex}`;
+
+    let blob;
+    let contentTypeHeader = '';
+    try {
+      const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      contentTypeHeader = res.headers.get('content-type') || '';
+      blob = await res.blob();
+    } catch (error) {
+      console.error(`[${LightboxPro.pluginName}] Original image fetch failed:`, error);
+      this.showToast('Could not load image');
+      return;
+    }
+
+    let mime = '';
+    if (blob.type && blob.type !== 'application/octet-stream') {
+      mime = blob.type.split(';')[0].trim();
+    } else if (contentTypeHeader) {
+      mime = contentTypeHeader.split(';')[0].trim();
+    }
+    if (!mime || mime === 'application/octet-stream') {
+      const extUrl = this.extensionFromUrl(url);
+      const mimeFromExt = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+        gif: 'image/gif',
+        svg: 'image/svg+xml',
+        avif: 'image/avif'
+      }[extUrl] || 'image/jpeg';
+      mime = mimeFromExt;
+    }
+
+    const ext =
+      this.extensionFromMime(mime) ||
+      this.extensionFromUrl(url) ||
+      'jpg';
+    const fileName = `${fallbackBase}.${ext}`;
+    const file = new File([blob], fileName, { type: mime });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.warn(`[${LightboxPro.pluginName}] Share failed, falling back to download:`, err);
+      }
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(objectUrl);
+  }
+
   async handleDownload(format) {
     const imageInfo = this.imageData.find(img => img.index === this.currentIndex);
     if (!imageInfo) return;
@@ -843,21 +940,6 @@ class LightboxPro {
         
         canvas.toBlob(async (blob) => {
           if (blob) {
-            if (this.isMobile() && navigator.canShare) {
-              const file = new File([blob], `${fileName}.${extension}`, { type: mimeType });
-              if (navigator.canShare({ files: [file] })) {
-                try {
-                  await navigator.share({ files: [file] });
-                  resolve();
-                  return;
-                } catch (err) {
-                  if (err.name !== 'AbortError') {
-                    console.warn(`[${LightboxPro.pluginName}] Share failed, falling back to download:`, err);
-                  }
-                }
-              }
-            }
-            
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -1081,3 +1163,4 @@ class LightboxPro {
   window.LightboxPro = LightboxPro;
   window.lightboxProInstances = instances;
 })();
+
