@@ -80,7 +80,6 @@ class LightboxPro {
   init() {
     LightboxPro.emitEvent(':beforeInit', { el: this.section }, this.section);
     
-    this.addDataAttribute();
     this.findLightbox();
     
     if (!this.lightboxWrapper) {
@@ -94,16 +93,13 @@ class LightboxPro {
     LightboxPro.emitEvent(':afterInit', { el: this.section }, this.section);
   }
 
-  addDataAttribute() {
-    this.section.setAttribute('data-wm-plugin', LightboxPro.pluginName);
-  }
-
   findLightbox() {
     this.lightboxWrapper = document.querySelector(
       `.gallery-lightbox-outer-wrapper[data-lightbox-section-id="${this.sectionId}"]`
     );
     
     if (this.lightboxWrapper) {
+      this.lightboxWrapper.setAttribute('data-wm-plugin', LightboxPro.pluginName);
       this.lightbox = this.lightboxWrapper.querySelector('.gallery-lightbox');
     }
   }
@@ -1115,9 +1111,8 @@ class LightboxPro {
       this.lightboxWrapper.removeAttribute('data-lbp-custom-arrows');
       this.lightboxWrapper.removeAttribute('data-lbp-description');
       this.lightboxWrapper.removeAttribute('data-lbp-mobile-nav');
+      this.lightboxWrapper.removeAttribute('data-wm-plugin');
     }
-
-    this.section.removeAttribute('data-wm-plugin');
     
     const galleryItems = this.section.querySelectorAll('[data-lbp-index]');
     galleryItems.forEach(item => item.removeAttribute('data-lbp-index'));
@@ -1188,3 +1183,4 @@ class LightboxPro {
   window.LightboxPro = LightboxPro;
   window.lightboxProInstances = instances;
 })();
+
