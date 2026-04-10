@@ -824,12 +824,37 @@ class LightboxPro {
     }
   }
 
+  downloadFileNameBase(url, fallbackIndex) {
+    if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
+      return `image-${fallbackIndex}`;
+    }
+    try {
+      const pathname = new URL(url, window.location.href).pathname;
+      const segment = pathname.split('/').filter(Boolean).pop() || '';
+      let decoded = segment;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        decoded = segment;
+      }
+      const withoutExt = decoded.replace(/\.[^.]+$/i, '');
+      const sanitized = withoutExt
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/^\.+/, '')
+        .trim();
+      if (sanitized) return sanitized.slice(0, 200);
+    } catch {
+      // fall through
+    }
+    return `image-${fallbackIndex}`;
+  }
+
   async handleMobileDownloadOriginal() {
     const imageInfo = this.imageData.find(img => img.index === this.currentIndex);
     if (!imageInfo) return;
 
     const url = imageInfo.originalSrc;
-    const fallbackBase = `image-${this.currentIndex}`;
+    const fallbackBase = this.downloadFileNameBase(url, this.currentIndex);
 
     let blob;
     let contentTypeHeader = '';
@@ -896,7 +921,7 @@ class LightboxPro {
     if (!imageInfo) return;
 
     const originalSrc = imageInfo.originalSrc;
-    const fileName = `image-${this.currentIndex}`;
+    const fileName = this.downloadFileNameBase(originalSrc, this.currentIndex);
 
     try {
       if (format === 'png') {
@@ -1163,4 +1188,3 @@ class LightboxPro {
   window.LightboxPro = LightboxPro;
   window.lightboxProInstances = instances;
 })();
-
