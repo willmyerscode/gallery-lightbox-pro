@@ -63,6 +63,7 @@ class LightboxPro {
     this.minZoom = 1;
     this.maxZoom = 3;
     this.zoomStep = 0.5;
+    this.zoomPanTarget = null;
     this.imageData = [];
     this.slideUrlToIndex = {};
     this.isBackend = window.top !== window.self;
@@ -207,6 +208,7 @@ class LightboxPro {
       this.buildHeaderControls();
       this.buildFooter();
       this.setupNavigationObserver();
+      this.setupZoomPan();
       this.setupOutsideClickClose();
       this.resetZoom();
       
@@ -285,8 +287,6 @@ class LightboxPro {
     this.removeToast();
     this.resetZoom();
     this.currentIndex = 0;
-    this.useManualNavigation = false;
-    clearTimeout(this.manualNavTimeout);
     
     LightboxPro.emitEvent(':lightboxClose', { el: this.section }, this.section);
   }
@@ -457,21 +457,21 @@ class LightboxPro {
   }
 
   removeNavigationListeners() {
-    const prevControl = this.lightboxWrapper?.querySelector('.gallery-lightbox-control[data-previous] button');
-    const nextControl = this.lightboxWrapper?.querySelector('.gallery-lightbox-control[data-next] button');
+    this.removeZoomPanListeners();
 
-    if (prevControl && this.boundHandlers.prevClick) {
-      prevControl.removeEventListener('click', this.boundHandlers.prevClick);
-    }
-    if (nextControl && this.boundHandlers.nextClick) {
-      nextControl.removeEventListener('click', this.boundHandlers.nextClick);
-    }
     if (this.boundHandlers.keydown) {
-      document.removeEventListener('keydown', this.boundHandlers.keydown);
+      document.removeEventListener('keydown', this.boundHandlers.keydown, true);
       this.boundHandlers.keydown = null;
     }
     
     const wrapper = this.lightbox?.querySelector('.gallery-lightbox-wrapper');
+    if (this.navigationListObserver) {
+      this.navigationListObserver.disconnect();
+      const idx = this.observers.indexOf(this.navigationListObserver);
+      if (idx >= 0) this.observers.splice(idx, 1);
+      this.navigationListObserver = null;
+    }
+
     if (wrapper) {
       if (this.boundHandlers.preventSwipe) {
         wrapper.removeEventListener('touchstart', this.boundHandlers.preventSwipe, { capture: true });
@@ -488,8 +488,6 @@ class LightboxPro {
         this.boundHandlers.swipeTouchEnd = null;
       }
     }
-    
-    this.isNavigating = false;
   }
 
   buildFooter() {
@@ -624,18 +622,15 @@ class LightboxPro {
     const list = this.lightbox.querySelector('.gallery-lightbox-list');
     if (!list) return;
 
-    this.isNavigating = false;
-    this.lastActiveIndex = this.currentIndex;
-
-    this.useManualNavigation = false;
+    if (this.navigationListObserver) {
+      this.navigationListObserver.disconnect();
+      const idx = this.observers.indexOf(this.navigationListObserver);
+      if (idx >= 0) this.observers.splice(idx, 1);
+      this.navigationListObserver = null;
+    }
 
     const observer = new MutationObserver(() => {
       this.resetZoom();
-      
-      if (this.useManualNavigation) {
-        return;
-      }
-      
       this.updateCurrentIndex();
       this.updateFooter();
     });
@@ -646,49 +641,25 @@ class LightboxPro {
       subtree: true
     });
 
+    this.navigationListObserver = observer;
     this.observers.push(observer);
-
-
-    const navigate = (direction) => {
-      if (direction === 'prev') {
-        this.currentIndex = this.currentIndex > 1 ? this.currentIndex - 1 : this.totalImages;
-      } else {
-        this.currentIndex = this.currentIndex < this.totalImages ? this.currentIndex + 1 : 1;
-      }
-      
-      this.updateCountDisplay();
-      
-      this.useManualNavigation = true;
-      clearTimeout(this.manualNavTimeout);
-      this.manualNavTimeout = setTimeout(() => {
-        this.useManualNavigation = false;
-      }, 500);
-    };
-
-    const prevControl = this.lightboxWrapper.querySelector('.gallery-lightbox-control[data-previous] button');
-    const nextControl = this.lightboxWrapper.querySelector('.gallery-lightbox-control[data-next] button');
-
-    if (prevControl) {
-      this.boundHandlers.prevClick = () => navigate('prev');
-      prevControl.addEventListener('click', this.boundHandlers.prevClick);
-    }
-
-    if (nextControl) {
-      this.boundHandlers.nextClick = () => navigate('next');
-      nextControl.addEventListener('click', this.boundHandlers.nextClick);
-    }
 
     this.boundHandlers.keydown = (e) => {
       if (this.lightbox.dataset.open !== 'true') return;
       if (e.repeat) return;
-      
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')) {
+        return;
+      }
+
       if (e.key === 'ArrowLeft') {
-        navigate('prev');
+        e.preventDefault();
+        this.navigatePrev();
       } else if (e.key === 'ArrowRight') {
-        navigate('next');
+        e.preventDefault();
+        this.navigateNext();
       }
     };
-    document.addEventListener('keydown', this.boundHandlers.keydown);
+    document.addEventListener('keydown', this.boundHandlers.keydown, true);
 
     if (this.settings.mobileNavigationType === 'arrows') {
       this.disableNativeSwipe();
@@ -767,18 +738,30 @@ class LightboxPro {
     }
   }
 
+  /**
+   * Squarespace often listens on the control wrapper as well as the inner button.
+   * HTMLElement.click() fires a bubbling click, which can advance the carousel twice.
+   */
+  triggerGalleryNavClick(button) {
+    if (!button) return;
+    button.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: false,
+        cancelable: true,
+        view: window,
+        detail: 1
+      })
+    );
+  }
+
   navigatePrev() {
     const prevBtn = this.lightboxWrapper.querySelector('.gallery-lightbox-control[data-previous] button');
-    if (prevBtn) {
-      prevBtn.click();
-    }
+    this.triggerGalleryNavClick(prevBtn);
   }
 
   navigateNext() {
     const nextBtn = this.lightboxWrapper.querySelector('.gallery-lightbox-control[data-next] button');
-    if (nextBtn) {
-      nextBtn.click();
-    }
+    this.triggerGalleryNavClick(nextBtn);
   }
 
   toggleDownloadDropdown() {
@@ -1060,21 +1043,135 @@ class LightboxPro {
     this.updateZoomButtons();
   }
 
+  getActiveSlideItem() {
+    return this.lightbox?.querySelector('.gallery-lightbox-item[data-active="true"]') || null;
+  }
+
+  getActiveImageContainer() {
+    return this.getActiveSlideItem()?.querySelector('.gallery-lightbox-item-img') || null;
+  }
+
+  setupZoomPan() {
+    if (!this.settings.zoomEnabled) return;
+
+    const wrapper = this.lightbox?.querySelector('.gallery-lightbox-wrapper');
+    if (!wrapper) return;
+
+    this.removeZoomPanListeners();
+    this.zoomPanTarget = wrapper;
+
+    this.boundHandlers.zoomPanMove = (e) => this.handleZoomPan(e);
+    this.boundHandlers.zoomPanLeave = () => this.resetZoomPan();
+
+    wrapper.addEventListener('mousemove', this.boundHandlers.zoomPanMove);
+    wrapper.addEventListener('mouseleave', this.boundHandlers.zoomPanLeave);
+  }
+
+  removeZoomPanListeners() {
+    if (!this.zoomPanTarget) return;
+
+    if (this.boundHandlers.zoomPanMove) {
+      this.zoomPanTarget.removeEventListener('mousemove', this.boundHandlers.zoomPanMove);
+      this.boundHandlers.zoomPanMove = null;
+    }
+    if (this.boundHandlers.zoomPanLeave) {
+      this.zoomPanTarget.removeEventListener('mouseleave', this.boundHandlers.zoomPanLeave);
+      this.boundHandlers.zoomPanLeave = null;
+    }
+
+    this.zoomPanTarget = null;
+  }
+
+  handleZoomPan(e) {
+    if (this.zoomLevel <= this.minZoom) return;
+
+    const imageContainer = this.getActiveImageContainer();
+    const activeItem = this.getActiveSlideItem();
+    const img = imageContainer?.querySelector('img');
+    if (!imageContainer || !activeItem || !img) return;
+
+    const rect = imageContainer.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const ratioX = (e.clientX - rect.left) / rect.width;
+    const ratioY = (e.clientY - rect.top) / rect.height;
+    const panRange = ((this.zoomLevel - 1) / this.zoomLevel) * 50;
+    const panX = (0.5 - ratioX) * 2 * panRange;
+    const panY = (0.5 - ratioY) * 2 * panRange;
+
+    activeItem.style.setProperty('--gallery-lightbox-pan-x', `${panX}%`);
+    activeItem.style.setProperty('--gallery-lightbox-pan-y', `${panY}%`);
+    img.classList.add('lbp-zoom-panning');
+  }
+
+  resetZoomPan() {
+    const items = this.lightbox?.querySelectorAll('.gallery-lightbox-item');
+    items?.forEach(item => {
+      item.style.setProperty('--gallery-lightbox-pan-x', '0%');
+      item.style.setProperty('--gallery-lightbox-pan-y', '0%');
+    });
+
+    this.lightbox?.querySelectorAll('.gallery-lightbox-item-img img.lbp-zoom-panning')
+      .forEach(img => img.classList.remove('lbp-zoom-panning'));
+  }
+
+  updateZoomCursor() {
+    const isZoomed = this.zoomLevel > this.minZoom;
+
+    this.lightbox?.querySelectorAll('.gallery-lightbox-item-img.lbp-zoom-active')
+      .forEach(container => container.classList.remove('lbp-zoom-active'));
+
+    if (this.lightboxWrapper) {
+      this.lightboxWrapper.dataset.lbpZoomed = isZoomed ? 'true' : 'false';
+    }
+
+    const imageContainer = this.getActiveImageContainer();
+    const activeImg = imageContainer?.querySelector('img');
+
+    if (imageContainer) {
+      imageContainer.classList.toggle('lbp-zoom-active', isZoomed);
+    }
+    if (activeImg) {
+      activeImg.style.cursor = isZoomed ? 'pointer' : '';
+    }
+  }
+
   applyZoom() {
-    const activeItem = this.lightbox.querySelector('.gallery-lightbox-item[data-active="true"]');
+    const activeItem = this.getActiveSlideItem();
     if (activeItem) {
-      activeItem.style.setProperty('--lbp-zoom-level', this.zoomLevel);
+      activeItem.style.setProperty('--gallery-lightbox-zoom-level', this.zoomLevel);
+    }
+
+    this.updateZoomCursor();
+
+    if (this.zoomLevel <= this.minZoom) {
+      this.resetZoomPan();
     }
   }
 
   resetZoom() {
     this.zoomLevel = 1;
-    
+
     const items = this.lightbox.querySelectorAll('.gallery-lightbox-item');
     items.forEach(item => {
-      item.style.setProperty('--lbp-zoom-level', 1);
+      item.style.setProperty('--gallery-lightbox-zoom-level', 1);
+      item.style.setProperty('--gallery-lightbox-pan-x', '0%');
+      item.style.setProperty('--gallery-lightbox-pan-y', '0%');
     });
-    
+
+    this.lightbox?.querySelectorAll('.gallery-lightbox-item-img img.lbp-zoom-panning')
+      .forEach(img => {
+        img.classList.remove('lbp-zoom-panning');
+        img.style.cursor = '';
+      });
+
+    this.lightbox?.querySelectorAll('.gallery-lightbox-item-img.lbp-zoom-active')
+      .forEach(container => container.classList.remove('lbp-zoom-active'));
+
+    if (this.lightboxWrapper) {
+      this.lightboxWrapper.dataset.lbpZoomed = 'false';
+    }
+
     this.updateZoomButtons();
   }
 
@@ -1105,6 +1202,7 @@ class LightboxPro {
     if (this.lightboxWrapper) {
       this.lightboxWrapper.removeAttribute('data-lbp-active');
       this.lightboxWrapper.removeAttribute('data-lbp-zoom');
+      this.lightboxWrapper.removeAttribute('data-lbp-zoomed');
       this.lightboxWrapper.removeAttribute('data-lbp-download');
       this.lightboxWrapper.removeAttribute('data-lbp-share');
       this.lightboxWrapper.removeAttribute('data-lbp-arrows');
